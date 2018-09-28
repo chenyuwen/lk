@@ -23,7 +23,7 @@ $(OUTELF): $(ALLMODULE_OBJS) $(EXTRA_OBJS) $(LINKER_SCRIPT) $(EXTRA_LINKER_SCRIP
 	@echo linking $@
 	$(NOECHO)$(SIZE) -t --common $(sort $(ALLMODULE_OBJS)) $(EXTRA_OBJS)
 	$(NOECHO)$(LD) $(GLOBAL_LDFLAGS) -dT $(LINKER_SCRIPT) $(addprefix -T,$(EXTRA_LINKER_SCRIPTS)) \
-		$(ALLMODULE_OBJS) $(EXTRA_OBJS) $(LIBGCC) -o $@
+		$(ALLMODULE_OBJS) $(EXTRA_OBJS) $(LIBGCC) -Map=$(OUTELF).map -o $@
 
 $(OUTELF).sym: $(OUTELF)
 	@echo generating symbols: $@
@@ -50,17 +50,13 @@ $(OUTELF).size: $(OUTELF)
 	$(NOECHO)$(NM) -S --size-sort $< > $@
 
 # print some information about the build
-$(BUILDDIR)/srcfiles.txt:
+$(BUILDDIR)/srcfiles.txt: $(OUTELF)
 	@echo generating $@
 	$(NOECHO)echo $(sort $(ALLSRCS)) | tr ' ' '\n' > $@
 
-.PHONY: $(BUILDDIR)/srcfiles.txt
-
-$(BUILDDIR)/include_paths.txt:
+$(BUILDDIR)/include_paths.txt: $(OUTELF)
 	@echo generating $@
 	$(NOECHO)echo $(subst -I,,$(sort $(GLOBAL_INCLUDES))) | tr ' ' '\n' > $@
-
-.PHONY: $(BUILDDIR)/include_paths.txt
 
 #include arch/$(ARCH)/compile.mk
 

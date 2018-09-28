@@ -27,6 +27,20 @@
 
 void arm_gic_init(void);
 
+#define GIC_BASE_SGI 0
+#define GIC_BASE_PPI 16
+#define GIC_BASE_SPI 32
+
+enum interrupt_trigger_mode {
+    IRQ_TRIGGER_MODE_EDGE = 0,
+    IRQ_TRIGGER_MODE_LEVEL = 1,
+};
+
+enum interrupt_polarity {
+    IRQ_POLARITY_ACTIVE_HIGH = 0,
+    IRQ_POLARITY_ACTIVE_LOW = 1,
+};
+
 enum {
     /* Ignore cpu_mask and forward interrupt to all CPUs other than the current cpu */
     ARM_GIC_SGI_FLAG_TARGET_FILTER_NOT_SENDER = 0x1,

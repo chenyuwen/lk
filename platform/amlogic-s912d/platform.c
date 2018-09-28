@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015 Travis Geiselbrecht
+ * Copyright (c) 2018 The Fuchsia Authors
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -20,28 +20,30 @@
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#include <reg.h>
-#include <err.h>
-#include <debug.h>
+
+#include <arch/arm64.h>
 #include <trace.h>
-#include <dev/uart.h>
-#include <arch.h>
-#include <arch/arm.h>
-#include <arch/arm/mmu.h>
+#include <assert.h>
+#include <err.h>
+#include <bits.h>
+#include <kernel/spinlock.h>
+#include <kernel/thread.h>
+#include <kernel/mp.h>
+#include <platform/interrupts.h>
 #include <lk/init.h>
 #include <kernel/vm.h>
 #include <kernel/spinlock.h>
 #include <dev/timer/arm_generic.h>
 #include <platform.h>
-#include <platform/interrupts.h>
-#include <platform/bcm2835.h>
+#include <dev/interrupt/arm_gic.h>
+#include <dev/timer/arm_generic.h>
+#include <platform/s912d.h>
+#include <dev/uart.h>
 
-extern void intc_init(void);
-extern void arm_reset(void);
+typedef struct arm64_iframe_long arm_platform_iframe_t;
 
 /* initial memory mappings. parsed by start.S */
 struct mmu_initial_mapping mmu_initial_mappings[] = {
-    /* 1GB of sdram space */
     {
         .phys = SDRAM_BASE,
         .virt = KERNEL_BASE,
@@ -52,21 +54,12 @@ struct mmu_initial_mapping mmu_initial_mappings[] = {
 
     /* peripherals */
     {
-        .phys = BCM_PERIPH_BASE_PHYS,
-        .virt = BCM_PERIPH_BASE_VIRT,
-        .size = BCM_PERIPH_SIZE,
+        .phys = AML_S912D_PERIPH_BASE_PHYS,
+        .virt = AML_S912D_PERIPH_BASE_VIRT,
+        .size = AML_S912D_PERIPH_BASE_SIZE,
         .flags = MMU_INITIAL_MAPPING_FLAG_DEVICE,
-        .name = "bcm peripherals"
+        .name = "peripherals"
     },
-
-    /* identity map to let the boot code run */
-    {
-        .phys = SDRAM_BASE,
-        .virt = SDRAM_BASE,
-        .size = 16*1024*1024,
-        .flags = MMU_INITIAL_MAPPING_TEMPORARY
-    },
-
     /* null entry to terminate the list */
     { 0 }
 };
@@ -77,36 +70,6 @@ static pmm_arena_t arena = {
     .size = MEMSIZE,
     .flags = PMM_ARENA_FLAG_KMAP,
 };
-
-void platform_init_mmu_mappings(void)
-{
-}
-
-void platform_early_init(void)
-{
-    uart_init_early();
-
-    intc_init();
-
-    arm_generic_timer_init(INTERRUPT_ARM_LOCAL_CNTPNSIRQ, 1000000);
-
-    /* add the main memory arena */
-    pmm_add_arena(&arena);
-
-#if WITH_SMP
-    /* start the other cpus */
-    uintptr_t sec_entry = (uintptr_t)&arm_reset;
-    sec_entry -= (KERNEL_BASE - MEMBASE);
-    for (uint i = 1; i <= 3; i++) {
-        *REG32(ARM_LOCAL_BASE + 0x8c + 0x10 * i) = sec_entry;
-    }
-#endif
-}
-
-void platform_init(void)
-{
-    uart_init();
-}
 
 #define DEBUG_UART 0
 
@@ -124,5 +87,25 @@ int platform_dgetc(char *c, bool wait)
         return -1;
     *c = ret;
     return 0;
+}
+
+void platform_init(void)
+{
+    uart_init();
+
+}
+
+void platform_early_init(void)
+{
+    uart_init_early();
+
+    /* initialize the interrupt controller */
+    arm_gic_init();
+
+    arm_generic_timer_init(30, 0);
+
+    pmm_add_arena(&arena);
+
+    // TODO: Reserve memory regions if needed
 }
 

@@ -26,9 +26,11 @@
 #include <assert.h>
 #include <dev/uart.h>
 #include <lib/cbuf.h>
+#include <lib/io.h>
 #include <platform/rcc.h>
 #include <stdint.h>
 #include <stm32f0xx.h>
+#include <target/debugconfig.h>
 
 typedef USART_TypeDef stm32_usart_t;
 
@@ -55,11 +57,11 @@ cbuf_t uart3_rx_buf;
 #endif
 #endif
 
-#ifdef ENABLE_UART1
+#ifdef ENABLE_UART4
+cbuf_t uart4_rx_buf;
+#ifndef UART4_FLOWCONTROL
+#define UART4_FLOWCONTROL 0x0
 #endif
-#ifdef ENABLE_UART2
-#endif
-#ifdef ENABLE_UART3
 #endif
 
 static void stm32_usart_init1_early(stm32_usart_t *usart,
@@ -102,6 +104,10 @@ static void stm32_usart_init1(stm32_usart_t *usart, int irqn, cbuf_t *rxbuf)
     NVIC_EnableIRQ(irqn);
 }
 
+#if defined(ENABLE_UART3) && defined(ENABLE_UART4)
+#error UART3 and 4 share an interrupt; not supported
+#endif
+
 void uart_init_early(void)
 {
 #ifdef ENABLE_UART1
@@ -113,6 +119,9 @@ void uart_init_early(void)
 #ifdef ENABLE_UART3
     stm32_rcc_set_enable(STM32_RCC_CLK_USART3, true);
 #endif
+#ifdef ENABLE_UART4
+    stm32_rcc_set_enable(STM32_RCC_CLK_USART4, true);
+#endif
 
 #ifdef ENABLE_UART1
     stm32_usart_init1_early(USART1, UART1_FLOWCONTROL, USART1_IRQn);
@@ -121,7 +130,10 @@ void uart_init_early(void)
     stm32_usart_init1_early(USART2, UART2_FLOWCONTROL, USART2_IRQn);
 #endif
 #ifdef ENABLE_UART3
-    stm32_usart_init1_early(USART3, UART3_FLOWCONTROL, USART3_IRQn);
+    stm32_usart_init1_early(USART3, UART3_FLOWCONTROL, USART3_4_IRQn);
+#endif
+#ifdef ENABLE_UART4
+    stm32_usart_init1_early(USART4, UART4_FLOWCONTROL, USART3_4_IRQn);
 #endif
 }
 
@@ -134,7 +146,10 @@ void uart_init(void)
     stm32_usart_init1(USART2, USART2_IRQn, &uart2_rx_buf);
 #endif
 #ifdef ENABLE_UART3
-    stm32_usart_init1(USART3, USART3_IRQn, &uart3_rx_buf);
+    stm32_usart_init1(USART3, USART3_4_IRQn, &uart3_rx_buf);
+#endif
+#ifdef ENABLE_UART4
+    stm32_usart_init1(USART4, USART3_4_IRQn, &uart4_rx_buf);
 #endif
 }
 
@@ -162,24 +177,61 @@ static void stm32_uart_rx_irq(stm32_usart_t *usart, cbuf_t *rxbuf)
     arm_cm_irq_exit(resched);
 }
 
+static cbuf_t *stm32_get_rxbuf(int port)
+{
+#if CONSOLE_HAS_INPUT_BUFFER
+    if (DEBUG_UART == port) {
+        return &console_input_cbuf;
+    }
+#endif
+    switch (port) {
+#ifdef ENABLE_UART1
+        case 1:
+            return &uart1_rx_buf;
+#endif
+#ifdef ENABLE_UART2
+        case 2:
+            return &uart2_rx_buf;
+#endif
+#ifdef ENABLE_UART3
+        case 3:
+            return &uart3_rx_buf;
+#endif
+#ifdef ENABLE_UART4
+        case 4:
+            return &uart4_rx_buf;
+#endif
+        default:
+            ASSERT(false);
+            return 0;
+    }
+}
+
 #ifdef ENABLE_UART1
 void stm32_USART1_IRQ(void)
 {
-    stm32_uart_rx_irq(USART1, &uart1_rx_buf);
+    stm32_uart_rx_irq(USART1, stm32_get_rxbuf(1));
 }
 #endif
 
 #ifdef ENABLE_UART2
 void stm32_USART2_IRQ(void)
 {
-    stm32_uart_rx_irq(USART2, &uart2_rx_buf);
+    stm32_uart_rx_irq(USART2, stm32_get_rxbuf(2));
 }
 #endif
 
 #ifdef ENABLE_UART3
-void stm32_USART3_IRQ(void)
+void stm32_USART3_4_IRQ(void)
 {
-    stm32_uart_rx_irq(USART3, &uart3_rx_buf);
+    stm32_uart_rx_irq(USART3, stm32_get_rxbuf(3));
+}
+#endif
+
+#ifdef ENABLE_UART4
+void stm32_USART3_4_IRQ(void)
+{
+    stm32_uart_rx_irq(USART4, stm32_get_rxbuf(4));
 }
 #endif
 
@@ -216,27 +268,9 @@ static stm32_usart_t *stm32_get_usart(int port)
         case 3:
             return USART3;
 #endif
-        default:
-            ASSERT(false);
-            return 0;
-    }
-
-}
-
-static cbuf_t *stm32_get_rxbuf(int port)
-{
-    switch (port) {
-#ifdef ENABLE_UART1
-        case 1:
-            return &uart1_rx_buf;
-#endif
-#ifdef ENABLE_UART2
-        case 2:
-            return &uart2_rx_buf;
-#endif
-#ifdef ENABLE_UART3
-        case 3:
-            return &uart3_rx_buf;
+#ifdef ENABLE_UART4
+        case 4:
+            return USART4;
 #endif
         default:
             ASSERT(false);

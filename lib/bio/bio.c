@@ -332,7 +332,7 @@ size_t bio_trim_range(const bdev_t *dev, off_t offset, size_t len)
         return 0;
     if (len == 0)
         return 0;
-    if (offset + len > dev->total_size)
+    if ((off_t)(offset + len) > dev->total_size)
         len = dev->total_size - offset;
 
     return len;
@@ -492,7 +492,7 @@ void bio_initialize_bdev(bdev_t *dev,
 
 #if DEBUG
     // If we have been supplied information about our erase geometry, sanity
-    // check it in debug bulids.
+    // check it in debug builds.
     if (geometry_count && geometry) {
         for (size_t i = 0; i < geometry_count; ++i) {
             bio_erase_geometry_info_t *info = geometry + i;

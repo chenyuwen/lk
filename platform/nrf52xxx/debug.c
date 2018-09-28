@@ -32,7 +32,6 @@
 #include <target/debugconfig.h>
 
 
-
 void nrf52_debug_early_init(void)
 {
     uart_init_early();

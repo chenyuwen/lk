@@ -47,6 +47,7 @@ typedef struct cbuf {
  *
  * @param[in] cbuf A pointer to the cbuf structure to allocate.
  * @param[in] len The minimum number of bytes for the underlying data buffer.
+ * Must be a power of two.
  */
 void cbuf_initialize(cbuf_t *cbuf, size_t len);
 
@@ -56,7 +57,8 @@ void cbuf_initialize(cbuf_t *cbuf, size_t len);
  * Initialize a cbuf structure using the supplied buffer for internal storage.
  *
  * @param[in] cbuf A pointer to the cbuf structure to allocate.
- * @param[in] len The size of the supplied buffer, in bytes.
+ * @param[in] len The size of the supplied buffer, in bytes.  Must be a power
+ * of two.
  * @param[in] buf A pointer to the memory to be used for internal storage.
  */
 void cbuf_initialize_etc(cbuf_t *cbuf, size_t len, void *buf);
@@ -104,7 +106,7 @@ size_t cbuf_peek(cbuf_t *cbuf, iovec_t *regions);
  * supplied data.
  * @param[in] len The maximum number of bytes to write to the cbuf.
  * @param[in] canreschedule Rescheduling policy passed through to the internal
- * event when signalling the event to indicate that there is now data in the
+ * event when signaling the event to indicate that there is now data in the
  * buffer to be read.
  *
  * @return The number of bytes which were written (or skipped).

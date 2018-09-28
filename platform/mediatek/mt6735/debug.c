@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Travis Geiselbrecht
+ * Copyright (c) 2015 MediaTek Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -21,60 +21,57 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 #include <debug.h>
-#include <trace.h>
-#include <err.h>
-#include <sys/types.h>
-#include <kernel/thread.h>
+#include <arch/ops.h>
+#include <stdarg.h>
+#include <dev/uart.h>
+#include <platform/mt_uart.h>
 #include <platform.h>
-#include <platform/timer.h>
-#include <arch/arm/cm.h>
 
-#define LOCAL_TRACE 0
-
-#define TIME_BASE_COUNT 0xffff
-#define TICK_RATE 1000000
-
-static void stm32_tim_irq(uint num)
+void _dputc(char c)
 {
-    TRACEF("tim irq %d\n", num);
+    int port = mtk_get_current_uart();
+
+    if (c == '\n') {
+        uart_putc(port, '\r');
+    }
+
+    uart_putc(port, c);
+}
+
+int dgetc(char *c, bool wait)
+{
+    int _c;
+    int port = mtk_get_current_uart();
+
+    if ((_c = uart_getc(port, wait)) < 0) {
+        return -1;
+    }
+
+    *c = _c;
+    return 0;
+}
+
+void platform_halt(platform_halt_action suggested_action, platform_halt_reason reason)
+{
+    arch_disable_ints();
+    for (;;);
+}
+
+uint32_t debug_cycle_count(void)
+{
     PANIC_UNIMPLEMENTED;
 }
 
-void stm32_TIM3_IRQ(void)
+void platform_dputc(char c)
 {
-    stm32_tim_irq(3);
+    if (c == '\n') {
+        _dputc('\r');
+    }
+
+    _dputc(c);
 }
 
-void stm32_TIM4_IRQ(void)
+int platform_dgetc(char *c, bool wait)
 {
-    stm32_tim_irq(4);
-}
-
-void stm32_TIM5_IRQ(void)
-{
-    stm32_tim_irq(5);
-}
-
-void stm32_TIM6_IRQ(void)
-{
-    stm32_tim_irq(6);
-}
-
-void stm32_TIM7_IRQ(void)
-{
-    stm32_tim_irq(7);
-}
-
-/* time base */
-void stm32_TIM2_IRQ(void)
-{
-    stm32_tim_irq(2);
-}
-
-void stm32_timer_early_init(void)
-{
-}
-
-void stm32_timer_init(void)
-{
+    return dgetc(c, wait);
 }

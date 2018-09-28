@@ -10,6 +10,10 @@ MEMBASE := 0x20000000
 ARCH := arm
 ARM_CPU := cortex-m0
 
+ifeq ($(STM32_CHIP),stm32f070_xB)
+GLOBAL_DEFINES += STM32F070
+MEMSIZE ?= 16384
+endif
 ifeq ($(STM32_CHIP),stm32f072_x8)
 GLOBAL_DEFINES += \
         STM32F072
@@ -29,18 +33,20 @@ MODULE_SRCS += \
 	$(LOCAL_DIR)/can.c \
 	$(LOCAL_DIR)/debug.c \
 	$(LOCAL_DIR)/dma.c \
+	$(LOCAL_DIR)/exti.c \
 	$(LOCAL_DIR)/gpio.c \
 	$(LOCAL_DIR)/init.c \
+	$(LOCAL_DIR)/i2c.c \
 	$(LOCAL_DIR)/rcc.c \
 	$(LOCAL_DIR)/spi.c \
-	$(LOCAL_DIR)/timer.c \
+	$(LOCAL_DIR)/timer_capture.c \
 	$(LOCAL_DIR)/uart.c \
 	$(LOCAL_DIR)/usbc.c \
 	$(LOCAL_DIR)/vectab.c
 
-# use a two segment memory layout, where all of the read-only sections 
-# of the binary reside in rom, and the read/write are in memory. The 
-# ROMBASE, MEMBASE, and MEMSIZE make variables are required to be set 
+# use a two segment memory layout, where all of the read-only sections
+# of the binary reside in rom, and the read/write are in memory. The
+# ROMBASE, MEMBASE, and MEMSIZE make variables are required to be set
 # for the linker script to be generated properly.
 #
 LINKER_SCRIPT += \

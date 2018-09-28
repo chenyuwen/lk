@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015 Travis Geiselbrecht
+ * Copyright (c) 2012 Travis Geiselbrecht
  *
  * Permission is hereby granted, free of charge, to any person obtaining
  * a copy of this software and associated documentation files
@@ -20,12 +20,19 @@
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#pragma once
+#ifndef __TARGET_GPIOCONFIG_H
+#define __TARGET_GPIOCONFIG_H
 
-#include <platform/bcm2835.h>
+#include <platform/gpio.h>
 
-#define GICBASE(n)  (CPUPRIV_BASE_PHYS)
-#define GICC_OFFSET (0x0100)
-#define GICD_OFFSET (0x1000)
+#define GPIO_LED1   13
+#define GPIO_LED2   14
+#define GPIO_LED3   15
+#define GPIO_LED4   16
+
+#define UART0_TX_PIN    6
+#define UART0_RX_PIN    8
 
 
+
+#endif

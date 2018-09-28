@@ -12,8 +12,8 @@
 tmp                     .req x9
 tmp2                    .req x10
 wtmp2                   .req w10
-index                   .req x11
-index_shift             .req x12
+idx                     .req x11
+idx_shift               .req x12
 page_table              .req x13
 new_page_table          .req x14
 phys_offset             .req x15
@@ -30,12 +30,18 @@ attr                    .req x27
 
 .section .text.boot
 FUNCTION(_start)
+.globl arm_reset
+arm_reset:
+    bl      arm64_elX_to_el1
+
 #if WITH_KERNEL_VM
     /* enable caches so atomics and spinlocks work */
     mrs     tmp, sctlr_el1
     orr     tmp, tmp, #(1<<12) /* Enable icache */
     orr     tmp, tmp, #(1<<2)  /* Enable dcache/ucache */
-    bic     tmp, tmp, #(1<<3)  /* Disable Stack Alignment Check */ /* TODO: don't use unaligned stacks */
+    orr     tmp, tmp, #(1<<3)  /* Enable Stack Alignment Check EL1 */
+    orr     tmp, tmp, #(1<<4)  /* Enable Stack Alignment Check EL0 */
+    bic     tmp, tmp, #(1<<1)  /* Disable Alignment Checking for EL1 EL0 */
     msr     sctlr_el1, tmp
 
     /* set up the mmu according to mmu_initial_mappings */
@@ -69,6 +75,7 @@ FUNCTION(_start)
     add     mmu_initial_mapping, mmu_initial_mapping, #:lo12:mmu_initial_mappings
 
 .Linitial_mapping_loop:
+/* Read entry of mmu_initial_mappings (likely defined in platform.c) */
     ldp     paddr, vaddr, [mmu_initial_mapping, #__MMU_INITIAL_MAPPING_PHYS_OFFSET]
     ldp     size, tmp, [mmu_initial_mapping, #__MMU_INITIAL_MAPPING_SIZE_OFFSET]
 
@@ -79,7 +86,7 @@ FUNCTION(_start)
     str     size, [mmu_initial_mapping, #__MMU_INITIAL_MAPPING_SIZE_OFFSET]
 
 .Lnot_dynamic:
-    /* if size == 0, end of list */
+    /* if size == 0, end of list, done with initial mapping */
     cbz     size, .Linitial_mapping_done
     mov     mapping_size, size
 
@@ -87,13 +94,36 @@ FUNCTION(_start)
     tbzmask tmp, MMU_INITIAL_MAPPING_FLAG_UNCACHED, .Lnot_uncached
     ldr     attr, =MMU_INITIAL_MAP_STRONGLY_ORDERED
     b       .Lmem_type_done
+
 .Lnot_uncached:
+    /* is this memory mapped to device/peripherals? */
     tbzmask tmp, MMU_INITIAL_MAPPING_FLAG_DEVICE, .Lnot_device
     ldr     attr, =MMU_INITIAL_MAP_DEVICE
     b       .Lmem_type_done
 .Lnot_device:
 
+/* Determine the segment in which the memory resides and set appropriate
+ *  attributes.  In order to handle offset kernels, the following rules are
+ *  implemented below:
+ *      KERNEL_BASE    to __code_start             -read/write (see note below)
+ *      __code_start   to __rodata_start (.text)   -read only
+ *      __rodata_start to __data_start   (.rodata) -read only, execute never
+ *      __data_start   to .....          (.data)   -read/write
+ *
+ *  The space below __code_start is presently left as read/write (same as .data)
+ *   mainly as a workaround for the raspberry pi boot process.  Boot vectors for
+ *   secondary CPUs are in this area and need to be updated by cpu0 once the system
+ *   is ready to boot the secondary processors.
+ *   TODO: handle this via mmu_initial_mapping entries, which may need to be
+ *         extended with additional flag types
+ */
 .Lmapping_size_loop:
+    ldr     attr, =MMU_PTE_KERNEL_DATA_FLAGS
+    ldr     tmp, =__code_start
+    subs    size, tmp, vaddr
+    /* If page is below  the entry point (_start) mark as kernel data */
+    b.hi    .Lmem_type_done
+
     ldr     attr, =MMU_PTE_KERNEL_RO_FLAGS
     ldr     tmp, =__rodata_start
     subs    size, tmp, vaddr
@@ -130,40 +160,44 @@ FUNCTION(_start)
 .Lmap_range_top_loop:
     /* Select top level page table */
     mov     page_table, page_table1
-    mov     index_shift, #MMU_KERNEL_TOP_SHIFT
+    mov     idx_shift, #MMU_KERNEL_TOP_SHIFT
 
-    lsr     index, vaddr, index_shift
+    lsr     idx, vaddr, idx_shift
 
+
+/* determine the type of page table entry to use given alignment and size
+ *  of the chunk of memory we are mapping
+ */
 .Lmap_range_one_table_loop:
     /* Check if current level allow block descriptors */
-    cmp     index_shift, #MMU_PTE_DESCRIPTOR_BLOCK_MAX_SHIFT
+    cmp     idx_shift, #MMU_PTE_DESCRIPTOR_BLOCK_MAX_SHIFT
     b.hi    .Lmap_range_need_page_table
 
     /* Check if paddr and vaddr alignment allows a block descriptor */
     orr     tmp2, vaddr, paddr
-    lsr     tmp, tmp2, index_shift
-    lsl     tmp, tmp, index_shift
+    lsr     tmp, tmp2, idx_shift
+    lsl     tmp, tmp, idx_shift
     cmp     tmp, tmp2
     b.ne    .Lmap_range_need_page_table
 
     /* Check if size is large enough for a block mapping */
-    lsr     tmp, size, index_shift
+    lsr     tmp, size, idx_shift
     cbz     tmp, .Lmap_range_need_page_table
 
     /* Select descriptor type, page for level 3, block for level 0-2 */
     orr     tmp, attr, #MMU_PTE_L3_DESCRIPTOR_PAGE
-    cmp     index_shift, MMU_KERNEL_PAGE_SIZE_SHIFT
+    cmp     idx_shift, MMU_KERNEL_PAGE_SIZE_SHIFT
     beq     .Lmap_range_l3
     orr     tmp, attr, #MMU_PTE_L012_DESCRIPTOR_BLOCK
 .Lmap_range_l3:
 
     /* Write page table entry */
     orr     tmp, tmp, paddr
-    str     tmp, [page_table, index, lsl #3]
+    str     tmp, [page_table, idx, lsl #3]
 
     /* Move to next page table entry */
     mov     tmp, #1
-    lsl     tmp, tmp, index_shift
+    lsl     tmp, tmp, idx_shift
     add     vaddr, vaddr, tmp
     add     paddr, paddr, tmp
     subs    size, size, tmp
@@ -181,7 +215,7 @@ FUNCTION(_start)
 
 .Lmap_range_need_page_table:
     /* Check if page table entry is unused */
-    ldr     new_page_table, [page_table, index, lsl #3]
+    ldr     new_page_table, [page_table, idx, lsl #3]
     cbnz    new_page_table, .Lmap_range_has_page_table
 
     /* Calculate phys offset (needed for memory allocation) */
@@ -195,7 +229,7 @@ FUNCTION(_start)
 
     /* Write page table entry (with allocated page table) */
     orr     new_page_table, new_page_table, #MMU_PTE_L012_DESCRIPTOR_TABLE
-    str     new_page_table, [page_table, index, lsl #3]
+    str     new_page_table, [page_table, idx, lsl #3]
 
 .Lmap_range_has_page_table:
     /* Check descriptor type */
@@ -206,10 +240,10 @@ FUNCTION(_start)
     /* switch to next page table level */
     bic     page_table, new_page_table, #MMU_PTE_DESCRIPTOR_MASK
     mov     tmp, #~0
-    lsl     tmp, tmp, index_shift
+    lsl     tmp, tmp, idx_shift
     bic     tmp, vaddr, tmp
-    sub     index_shift, index_shift, #(MMU_KERNEL_PAGE_SIZE_SHIFT - 3)
-    lsr     index, tmp, index_shift
+    sub     idx_shift, idx_shift, #(MMU_KERNEL_PAGE_SIZE_SHIFT - 3)
+    lsr     idx, tmp, idx_shift
 
     b       .Lmap_range_one_table_loop
 
@@ -227,19 +261,21 @@ FUNCTION(_start)
 
     /* Setup mapping at phys -> phys */
     adr     tmp, .Lmmu_on_pc
-    lsr     tmp, tmp, #MMU_IDENT_TOP_SHIFT    /* tmp = paddr index */
+    lsr     tmp, tmp, #MMU_IDENT_TOP_SHIFT    /* tmp = paddr idx */
     ldr     tmp2, =MMU_PTE_IDENT_FLAGS
     add     tmp2, tmp2, tmp, lsl #MMU_IDENT_TOP_SHIFT  /* tmp2 = pt entry */
 
-    str     tmp2, [page_table0, tmp, lsl #3]     /* tt_trampoline[paddr index] = pt entry */
+    str     tmp2, [page_table0, tmp, lsl #3]     /* tt_trampoline[paddr idx] = pt entry */
 
 #if WITH_SMP
-    adr     tmp, page_tables_not_ready
+    adrp    tmp, page_tables_not_ready
+    add     tmp, tmp, #:lo12:page_tables_not_ready
     str     wzr, [tmp]
     b       .Lpage_tables_ready
 
 .Lmmu_enable_secondary:
-    adr     tmp, page_tables_not_ready
+    adrp    tmp, page_tables_not_ready
+    add     tmp, tmp, #:lo12:page_tables_not_ready
 .Lpage_tables_not_ready:
     ldr     wtmp2, [tmp]
     cbnz    wtmp2, .Lpage_tables_not_ready
@@ -250,8 +286,8 @@ FUNCTION(_start)
 
     /* Invalidate TLB */
     tlbi    vmalle1is
-    isb
     dsb     sy
+    isb
 
     /* Initialize Memory Attribute Indirection Register */
     ldr     tmp, =MMU_MAIR_VAL
@@ -295,6 +331,7 @@ FUNCTION(_start)
 
     /* Invalidate TLB */
     tlbi    vmalle1
+    dsb     sy
     isb
 
 #if WITH_SMP
@@ -307,9 +344,9 @@ FUNCTION(_start)
 
     /* clear bss */
 .L__do_bss:
-    /* clear out the bss */
-    /* NOTE: relies on __bss_start and __bss_end being 8 byte aligned */
-    ldr     tmp, =__bss_start
+    /* clear out the bss excluding the stack and kernel translation table  */
+    /* NOTE: relies on __post_prebss_bss_start and __bss_end being 8 byte aligned */
+    ldr     tmp, =__post_prebss_bss_start
     ldr     tmp2, =__bss_end
     sub     tmp2, tmp2, tmp
     cbz     tmp2, .L__bss_loop_done
